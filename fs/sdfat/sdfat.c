@@ -67,6 +67,9 @@
 #include "sdfat.h"
 #include "version.h"
 
+/* skip iterating emit_dots when dir is empty */
+#define ITER_POS_FILLED_DOTS	(2)
+
 /* type index declare at sdfat.h */
 const char* FS_TYPE_STR[] = {
 	"auto",
@@ -236,7 +239,7 @@ static int sdfat_iterate(struct file *filp, struct dir_context *ctx)
 	DENTRY_NAMEBUF_T *nb = &(de.NameBuf);
 	unsigned long inum;
 	loff_t cpos;
-	int err = 0;
+	int err = 0, fake_offset = 0;
 
 	sdfat_init_namebuf(nb);
 	__lock_super(sb);
@@ -245,8 +248,10 @@ static int sdfat_iterate(struct file *filp, struct dir_context *ctx)
 	if ((fsi->vol_type == EXFAT) || (inode->i_ino == SDFAT_ROOT_INO)) {
 		if (!dir_emit_dots(filp, ctx))
 			goto out;
-		if (ctx->pos == 2)
+		if (ctx->pos == ITER_POS_FILLED_DOTS) {
 			cpos = 0;
+			fake_offset = 1;
+		}
 	}
 	if (cpos & (DENTRY_SIZE - 1)) {
 		err = -ENOENT;
@@ -260,6 +265,9 @@ static int sdfat_iterate(struct file *filp, struct dir_context *ctx)
 get_new:
 	SDFAT_I(inode)->fid.size = i_size_read(inode);
 	SDFAT_I(inode)->fid.rwoffset = cpos >> DENTRY_SIZE_BITS;
+
+	if (cpos >= SDFAT_I(inode)->fid.size)
+		goto end_of_dir;
 
 	err = fsapi_readdir(inode, &de);
 	if (err) {
@@ -310,6 +318,8 @@ get_new:
 	goto get_new;
 
 end_of_dir:
+	if (!cpos && fake_offset)
+		cpos = ITER_POS_FILLED_DOTS;
 	ctx->pos = cpos;
 out:
 	__unlock_super(sb);
@@ -376,7 +386,7 @@ static int sdfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	DENTRY_NAMEBUF_T *nb = &(de.NameBuf);
 	unsigned long inum;
 	loff_t cpos;
-	int err = 0;
+	int err = 0, fake_offset = 0;
 
 	sdfat_init_namebuf(nb);
 	__lock_super(sb);
@@ -384,7 +394,7 @@ static int sdfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	cpos = filp->f_pos;
 	/* Fake . and .. for the root directory. */
 	if ((fsi->vol_type == EXFAT) || (inode->i_ino == SDFAT_ROOT_INO)) {
-		while (cpos < 2) {
+		while (cpos < ITER_POS_FILLED_DOTS) {
 			if (inode->i_ino == SDFAT_ROOT_INO)
 				inum = SDFAT_ROOT_INO;
 			else if (cpos == 0)
@@ -397,8 +407,9 @@ static int sdfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			cpos++;
 			filp->f_pos++;
 		}
-		if (cpos == 2) {
+		if (cpos == ITER_POS_FILLED_DOTS) {
 			cpos = 0;
+			fake_offset = 1;
 		}
 	}
 	if (cpos & (DENTRY_SIZE - 1)) {
@@ -413,6 +424,9 @@ static int sdfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 get_new:
 	SDFAT_I(inode)->fid.size = i_size_read(inode);
 	SDFAT_I(inode)->fid.rwoffset = cpos >> DENTRY_SIZE_BITS;
+
+	if (cpos >= SDFAT_I(inode)->fid.size)
+		goto end_of_dir;
 
 	err = fsapi_readdir(inode, &de);
 	if (err) {
@@ -463,6 +477,8 @@ get_new:
 	goto get_new;
 
 end_of_dir:
+	if (!cpos && fake_offset)
+		cpos = ITER_POS_FILLED_DOTS;
 	filp->f_pos = cpos;
 out:
 	__unlock_super(sb);
@@ -1046,7 +1062,7 @@ static int __sdfat_revalidate_ci(struct dentry *dentry, unsigned int flags)
 	 */
 	if (!flags)
 		return 0;
-
+#endif
 	/*
 	 * Drop the negative dentry, in order to make sure to use the
 	 * case sensitive name which is specified by user if this is
@@ -1054,7 +1070,6 @@ static int __sdfat_revalidate_ci(struct dentry *dentry, unsigned int flags)
 	 */
 	if (flags & (LOOKUP_CREATE | LOOKUP_RENAME_TARGET))
 		return 0;
-#endif
 	return __sdfat_revalidate_common(dentry);
 }
 
@@ -2250,16 +2265,29 @@ static struct dentry* __sdfat_lookup(struct inode *dir, struct dentry *dentry)
 	 */
 	if (alias && alias->d_parent == dentry->d_parent &&
 	    !sdfat_d_anon_disconn(alias)) {
+
 		/*
-		 * This inode has non anonymous-DCACHE_DISCONNECTED
-		 * dentry. This means, the user did ->lookup() by an
-		 * another name (longname vs 8.3 alias of it) in past.
-		 *
-		 * Switch to new one for reason of locality if possible.
+		 * Unhashed alias is able to exist because of revalidate()
+		 * called by lookup_fast. You can easily make this status
+		 * by calling create and lookup concurrently
+		 * In such case, we reuse an alias instead of new dentry
 		 */
-		BUG_ON(d_unhashed(alias));
-		if (!S_ISDIR(i_mode))
+		if (d_unhashed(alias)) {
+			BUG_ON(alias->d_name.hash_len != dentry->d_name.hash_len);
+			sdfat_msg(sb, KERN_INFO, "rehashed a dentry(%p) "
+				"in read lookup", alias);
+			d_drop(dentry);
+			d_rehash(alias);
+		} else if (!S_ISDIR(i_mode)) {
+			/*
+			 * This inode has non anonymous-DCACHE_DISCONNECTED
+			 * dentry. This means, the user did ->lookup() by an
+			 * another name (longname vs 8.3 alias of it) in past.
+			 *
+			 * Switch to new one for reason of locality if possible.
+			 */
 			d_move(alias, dentry);
+		}
 		iput(inode);
 		__unlock_super(sb);
 		TMSG("%s exited\n", __func__);
@@ -3051,11 +3079,11 @@ static int sdfat_da_prep_block(struct inode *inode, sector_t iblock,
 		/* get_block on non-existing addr. with create==0 */
 		/*
 		 * CHECKME: 
-		 * i_size_aligned 보다 작으면 delay 매핑을 일단 
-		 * 켜줘야되는 게 아닌가?
-		 * - 0-fill 을 항상 하기에, FAT 에서는 문제 없음.
-		 *   중간에 영역이 꽉 찼으면, 디스크에 내려가지 않고는 
-		 *   invalidate 될 일이 없음
+		 * If i_size_aligned is less than, the delay mapping is
+		 * Should not I turn it on?
+		 * - Since 0-fill is always present, no problem with FAT.
+		 *   If the area is full in the middle,
+		 *   Nothing to invalidate
 		 */
 		goto unlock_ret;
 	}
@@ -3163,13 +3191,12 @@ static int sdfat_get_block(struct inode *inode, sector_t iblock,
 				 */
 			 
 				/* 20130723 CHECK
-				 * Truncate와 동시에 발생할 경우,
-				 * i_size < (i_block 위치) 면서 buffer_delay()가
-				 * 켜져있을 수 있다.
+				 * If occurs simultaneously with Truncate,
+				 * I_size <(i_block position) while buffer_delay ()
+				 * Can be turned on.
 				 *
-				 * 기존에 할당된 영역을 다시 쓸 뿐이므로 큰 문제
-				 * 없지만, 그 경우, 미리 i_size_algined 가 확장된
-				 * 영역이어야 한다.
+				 * It is a big problem because it rewrites the previously allocated area,
+				 * But in that case, if i_size_algined is already expanded area.
 				 */
 
 				/* FOR GRACEFUL ERROR HANDLING :
@@ -3186,9 +3213,9 @@ static int sdfat_get_block(struct inode *inode, sector_t iblock,
 
 				set_buffer_new(bh_result);
 			
-				/* i_size_ondisk 이 i_size_aligned 보다 먼저 
-				 * 움직인 경우, (예: non-DA 상황)
-				 * 두 변수 사이의 관계 유지 
+				/* I_size_ondisk precedes i_size_aligned
+				 * If moving (eg non-DA situation)
+				 * Maintain the relationship between two variables
 				 */
 				if (SDFAT_I(inode)->i_size_ondisk > 
 						SDFAT_I(inode)->i_size_aligned) {
@@ -3622,6 +3649,7 @@ static int sdfat_fill_inode(struct inode *inode, const FILE_ID_T *fid)
 	struct sdfat_sb_info *sbi = SDFAT_SB(inode->i_sb);
 	FS_INFO_T *fsi = &(sbi->fsi);
 	DIR_ENTRY_T info;
+	u64 size = fid->size;
 
 	memcpy(&(SDFAT_I(inode)->fid), fid, sizeof(FILE_ID_T));
 
@@ -3663,16 +3691,20 @@ static int sdfat_fill_inode(struct inode *inode, const FILE_ID_T *fid)
 
 	}
 
-	i_size_write(inode, info.Size);
+	/*
+	 * Use fid->size instead of info.Size
+	 * because info.Size means the value saved on disk
+	 */
+	i_size_write(inode, size);
 
 	/* ondisk and aligned size should be aligned with block size */
-	if (info.Size & (inode->i_sb->s_blocksize - 1)) {
-		info.Size |= (inode->i_sb->s_blocksize - 1);
-		info.Size++;
+	if (size & (inode->i_sb->s_blocksize - 1)) {
+		size |= (inode->i_sb->s_blocksize - 1);
+		size++;
 	}
 
-	SDFAT_I(inode)->i_size_aligned = info.Size;
-	SDFAT_I(inode)->i_size_ondisk = info.Size;
+	SDFAT_I(inode)->i_size_aligned = size;
+	SDFAT_I(inode)->i_size_ondisk = size;
 	sdfat_debug_check_clusters(inode);
 
 	sdfat_save_attr(inode, info.Attr);
@@ -4534,6 +4566,7 @@ static int sdfat_read_root(struct inode *inode)
 	inode->i_fop = &sdfat_dir_operations;
 
 	i_size_write(inode, info.Size);
+	SDFAT_I(inode)->fid.size = info.Size;
 	inode->i_blocks = ( (i_size_read(inode) + (fsi->cluster_size - 1))
 		& ~((loff_t)fsi->cluster_size - 1) ) >> inode->i_blkbits;
 	SDFAT_I(inode)->i_pos = ((loff_t) fsi->root_dir << 32) | 0xffffffff;
