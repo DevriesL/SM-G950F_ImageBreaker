@@ -2,9 +2,9 @@
 
 export ARCH=arm64
 
-export PATH=/home/devries/aarch64-linux-android-4.9-kernel/bin:$PATH
+export PATH=/home/devries/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin:$PATH
 
-export CROSS_COMPILE=aarch64-linux-android-
+export CROSS_COMPILE=aarch64-linux-gnu-
 
 make exynos8895-dreamlte_eur_open_defconfig
 
@@ -17,7 +17,7 @@ make dtbs
 ./mkbootfs ramdisk | lzma > ramdisk.packed
 
 ./mkbootimg \
-      --kernel arch/arm64/boot/Image.gz \
+      --kernel arch/arm64/boot/Image \
       --ramdisk ramdisk.packed \
       --cmdline "" \
       --base 0x10000000 \
@@ -27,4 +27,5 @@ make dtbs
       --tags_offset 0x00000100 \
       --output boot.img
 
+echo SEANDROIDENFORCE >> boot.img
 tar -cvf boot.tar boot.img
