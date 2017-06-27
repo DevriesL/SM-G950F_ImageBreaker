@@ -1002,7 +1002,7 @@ int vb_queue_dqbuf(struct vb_queue *q,
 	bool nonblocking)
 {
 	int ret = 0;
-	struct vb_bundle *bundle;
+	struct vb_bundle *bundle = NULL;
 
 	if (q->direction != c->direction) {
 		vision_err("qbuf: invalid buffer direction\n");

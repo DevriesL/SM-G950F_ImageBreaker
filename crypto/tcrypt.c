@@ -76,7 +76,7 @@ static char *check[] = {
 	"lzo", "cts", "zlib", NULL
 };
 
-#ifdef CONFIG_CRYPTO_DRBG
+#if defined(CONFIG_CRYPTO_DRBG) && defined(CONFIG_CRYPTO_FIPS)
 static char *drbg_cores[] = {
 #ifdef CONFIG_CRYPTO_DRBG_CTR
 	"ctr_aes128",
@@ -96,7 +96,7 @@ static char *drbg_cores[] = {
 	"hmac_sha256",
 #endif /* CONFIG_CRYPTO_DRBG_HMAC */
 };
-#endif /* CONFIG_CRYPTO_DRBG */
+#endif
 
 struct tcrypt_result {
 	struct completion completion;

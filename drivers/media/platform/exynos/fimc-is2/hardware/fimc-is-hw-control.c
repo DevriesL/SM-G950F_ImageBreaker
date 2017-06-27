@@ -350,7 +350,7 @@ int fimc_is_set_mshot_frame(u32 instance,
 {
 	int ret = 0;
 	int i, j;
-	struct fimc_is_frame *hw_frame;
+	struct fimc_is_frame *hw_frame = NULL;
 
 	for (j = 1; j <= frame->num_buffers; j++) {
 		hw_frame = get_frame(framemgr, FS_HW_FREE);

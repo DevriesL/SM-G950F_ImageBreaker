@@ -244,29 +244,6 @@ static void abox_dump_auto_dump_work_func(struct work_struct *work)
 	}
 }
 
-void abox_dump_register_buffer_work_func(struct work_struct *work)
-{
-	struct device *dev;
-	int id;
-	struct abox_dump_buffer_info *info;
-
-	dev_dbg(dev, "%s\n", __func__);
-
-	for (info = &abox_dump_list[0]; (info - &abox_dump_list[0]) <
-			ARRAY_SIZE(abox_dump_list); info++) {
-		id = info->id;
-		if (info->dev && !abox_dump_get_buffer_info(id)) {
-			dev_info(dev, "%s[%d]\n", __func__, id);
-
-			list_add_tail(&info->list, &abox_dump_list_head);
-			platform_device_register_simple("samsung-abox-dump",
-					id, NULL, 0);
-		}
-	}
-}
-
-static DECLARE_WORK(abox_dump_register_buffer_work, abox_dump_register_buffer_work_func);
-
 int abox_dump_register_buffer(struct device *dev, int id, const char *name, void *area, phys_addr_t addr, size_t bytes)
 {
 	struct abox_dump_buffer_info *info;
@@ -292,7 +269,6 @@ int abox_dump_register_buffer(struct device *dev, int id, const char *name, void
 	info->buffer.bytes = bytes;
 	INIT_WORK(&info->auto_work, abox_dump_auto_dump_work_func);
 	abox_dump_dev_abox = info->dev = dev;
-	schedule_work(&abox_dump_register_buffer_work);
 
 	return 0;
 }

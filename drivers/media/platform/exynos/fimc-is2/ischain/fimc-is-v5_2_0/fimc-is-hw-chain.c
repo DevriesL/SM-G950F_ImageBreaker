@@ -481,8 +481,8 @@ int fimc_is_hw_ischain_cfg(void *ischain_data)
 	struct fimc_is_device_csi *csi;
 	int i, sensor_cnt = 0;
 	void __iomem *cam_regs = NULL;
-	void __iomem *isplp_regs;
-	void __iomem *isphq_regs;
+	void __iomem *isplp_regs = NULL;
+	void __iomem *isphq_regs = NULL;
 	u32 isplp_val = 0, isphq_val = 0, cam_val = 0;
 	u32 isplp_backup = 0, isphq_backup = 0, cam_backup = 0;
 	u32 input_bns = 0, input_wobns = 1;

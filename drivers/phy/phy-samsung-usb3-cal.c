@@ -481,7 +481,7 @@ static void exynos_cal_ss_enable(struct exynos_usbphy_info *info,
 	u32 phyclkrst = *arg_phyclkrst;
 	u32 phypipe;
 	u32 phyparam0;
-	u32 phyreg0;
+	u32 phyreg0 = 0;
 	void *reg_base;
 
 	if (port_num == 0)

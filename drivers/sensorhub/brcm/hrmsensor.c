@@ -172,7 +172,7 @@ static int hrm_power_ctrl(struct hrm_device_data *data, int onoff)
 	static int i2c_1p8_enable = 0;
 	struct regulator *regulator_led_3p3;
 	struct regulator *regulator_vdd_1p8;
-	struct regulator *regulator_i2c_1p8;
+	struct regulator *regulator_i2c_1p8 = NULL;
 
 	HRM_dbg("%s - onoff : %d, state : %d\n",
 		__func__, onoff, data->regulator_state);

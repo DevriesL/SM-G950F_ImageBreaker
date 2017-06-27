@@ -624,7 +624,7 @@ static void speedy_set_cmd(struct exynos_speedy *speedy, int direction, u16 addr
 
 static int speedy_batcher_wait_complete(struct exynos_speedy *speedy)
 {
-	u32 ip_batcher_state;
+	u32 ip_batcher_state = 0;
 	u32 ip_batcher_int_status;
 	int ret = -EBUSY;
 	unsigned long timeout;
