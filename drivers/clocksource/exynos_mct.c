@@ -451,6 +451,7 @@ static irqreturn_t exynos4_mct_tick_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+#ifdef CONFIG_EXYNOS_CORESIGHT
 static void exynos4_mct_tick_dump(unsigned int cpu)
 {
 	unsigned int icntb, icnto, tcon, intenb, intcstat;
@@ -479,6 +480,7 @@ static int exynos4_mct_hardlockup_handler(struct notifier_block *nb,
 	exynos4_mct_tick_dump(*cpu);
 	return 0;
 }
+#endif
 
 static int exynos4_local_timer_setup(struct mct_clock_event_device *mevt)
 {
@@ -566,9 +568,11 @@ static struct notifier_block exynos4_mct_cpu_nb = {
 	.notifier_call = exynos4_mct_cpu_notify,
 };
 
+#ifdef CONFIG_EXYNOS_CORESIGHT
 static struct notifier_block nb_hardlockup_block = {
 	.notifier_call = exynos4_mct_hardlockup_handler,
 };
+#endif
 
 static void __init exynos4_timer_resources(struct device_node *np, void __iomem *base)
 {
@@ -620,7 +624,9 @@ static void __init mct_init_dt(struct device_node *np, unsigned int int_type)
 
 	mct_int_type = int_type;
 
+#ifdef CONFIG_EXYNOS_CORESIGHT
 	atomic_notifier_chain_register(&hardlockup_notifier_list, &nb_hardlockup_block);
+#endif
 
 	/* This driver uses only one global timer interrupt */
 	mct_irqs[MCT_G0_IRQ] = irq_of_parse_and_map(np, MCT_G0_IRQ);
